@@ -15,9 +15,14 @@ export class SecureRealtimeService {
     temperature: number;
     maxTokens: number;
   } | null = null;
+  private authToken: string | null = null;
 
   constructor() {
     // No API key needed on client side anymore
+  }
+
+  setAuthToken(token: string) {
+    this.authToken = token;
   }
 
   async connect() {
@@ -26,17 +31,24 @@ export class SecureRealtimeService {
         useVoiceChatStore.getState();
 
       // Fetch ephemeral session token from our secure backend
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+
+      // Add auth token if available
+      if (this.authToken) {
+        headers["Authorization"] = `Bearer ${this.authToken}`;
+      }
+
       const tokenResponse = await fetch("/api/realtime/token", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers,
       });
 
       if (!tokenResponse.ok) {
         const errorData = await tokenResponse.json();
         throw new Error(
-          errorData.details || errorData.error || "Failed to get session token"
+          errorData.details || errorData.error || "Failed to get session token",
         );
       }
 
@@ -61,7 +73,7 @@ export class SecureRealtimeService {
           "realtime",
           `openai-insecure-api-key.${sessionData.client_secret}`,
           "openai-beta.realtime-v1",
-        ]
+        ],
       );
 
       this.ws.addEventListener("open", () => {
@@ -95,7 +107,7 @@ export class SecureRealtimeService {
         .setError(
           error instanceof Error
             ? error.message
-            : "Failed to connect to the service."
+            : "Failed to connect to the service.",
         );
     }
   }
@@ -295,7 +307,7 @@ export class SecureRealtimeService {
 
       // Create audio source
       const source = this.audioContext.createMediaStreamSource(
-        this.mediaStream
+        this.mediaStream,
       );
 
       // Create analyzer for visualization
@@ -340,8 +352,8 @@ export class SecureRealtimeService {
         const base64Audio = btoa(
           String.fromCharCode.apply(
             null,
-            Array.from(new Uint8Array(pcm16.buffer))
-          )
+            Array.from(new Uint8Array(pcm16.buffer)),
+          ),
         );
 
         // Send audio data to OpenAI
@@ -349,7 +361,7 @@ export class SecureRealtimeService {
           JSON.stringify({
             type: "input_audio_buffer.append",
             audio: base64Audio,
-          })
+          }),
         );
       };
 
@@ -392,7 +404,7 @@ export class SecureRealtimeService {
       this.ws.send(
         JSON.stringify({
           type: "input_audio_buffer.commit",
-        })
+        }),
       );
     }
   }
@@ -427,7 +439,7 @@ export class SecureRealtimeService {
             },
           ],
         },
-      })
+      }),
     );
 
     // Trigger response
@@ -438,7 +450,7 @@ export class SecureRealtimeService {
           modalities: ["text"],
           instructions: "Please respond to the user's message.",
         },
-      })
+      }),
     );
 
     setAppState("thinking");

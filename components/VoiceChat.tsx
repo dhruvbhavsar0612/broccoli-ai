@@ -103,60 +103,8 @@ export default function VoiceChat() {
       setError(null);
       const service = getSecureRealtimeService();
 
-      // Store original connect method
-      const originalConnect = service.connect.bind(service);
-
-      // Override connect to include auth token
-      service.connect = async function () {
-        try {
-          const {
-            setIsConnected,
-            setError: setServiceError,
-            setAppState,
-          } = useVoiceChatStore.getState();
-
-          // Fetch ephemeral session token from our secure backend with auth
-          const tokenResponse = await fetch("/api/realtime/token", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${authToken}`,
-            },
-          });
-
-          if (!tokenResponse.ok) {
-            const errorData = await tokenResponse.json();
-            throw new Error(
-              errorData.details ||
-                errorData.error ||
-                "Failed to get session token",
-            );
-          }
-
-          const sessionData = await tokenResponse.json();
-
-          if (!sessionData.client_secret) {
-            throw new Error("No session token received from server");
-          }
-
-          // Store session start time for tracking
-          setSessionStart(sessionData.sessionStart);
-          setRemainingSeconds(sessionData.remainingSeconds);
-
-          // Call original connect logic with session data
-          // We need to continue with the rest of the original connect method
-          return originalConnect();
-        } catch (error) {
-          console.error("Failed to connect:", error);
-          useVoiceChatStore
-            .getState()
-            .setError(
-              error instanceof Error
-                ? error.message
-                : "Failed to connect to the service.",
-            );
-        }
-      };
+      // Set auth token on the service
+      service.setAuthToken(authToken);
 
       await service.connect();
     } catch (err) {
