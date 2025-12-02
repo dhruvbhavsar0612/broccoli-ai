@@ -19,21 +19,48 @@ export default function VoiceChat() {
   const [sessionStart, setSessionStart] = useState<string | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState(180);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authEnabled, setAuthEnabled] = useState<boolean | null>(null); // null = loading
 
   const { isConnected, appState, error, setError, messages } =
     useVoiceChatStore();
 
-  // Check for existing auth on mount
+  // Check if auth is enabled on mount
   useEffect(() => {
-    const token = localStorage.getItem("authToken");
-    const email = localStorage.getItem("userEmail");
+    const checkAuthConfig = async () => {
+      try {
+        const response = await fetch("/api/config");
+        if (response.ok) {
+          const data = await response.json();
+          setAuthEnabled(data.enableAuth);
 
-    if (token && email) {
-      // Verify token is still valid
-      verifyToken(token, email);
-    } else {
-      setShowAuthModal(true);
-    }
+          if (!data.enableAuth) {
+            // Auth disabled - skip authentication
+            setIsAuthenticated(true);
+          } else {
+            // Auth enabled - check for existing token
+            const token = localStorage.getItem("authToken");
+            const email = localStorage.getItem("userEmail");
+
+            if (token && email) {
+              verifyToken(token, email);
+            } else {
+              setShowAuthModal(true);
+            }
+          }
+        } else {
+          // If config endpoint fails, default to no auth
+          setAuthEnabled(false);
+          setIsAuthenticated(true);
+        }
+      } catch (error) {
+        console.error("Failed to check auth config:", error);
+        // Default to no auth if config check fails
+        setAuthEnabled(false);
+        setIsAuthenticated(true);
+      }
+    };
+
+    checkAuthConfig();
   }, []);
 
   // Verify token with backend
@@ -94,7 +121,8 @@ export default function VoiceChat() {
 
   // Handle connection with auth
   const handleConnect = async () => {
-    if (!authToken) {
+    // Only require auth token if auth is enabled
+    if (authEnabled && !authToken) {
       setError("Please authenticate first");
       return;
     }
@@ -103,8 +131,10 @@ export default function VoiceChat() {
       setError(null);
       const service = getSecureRealtimeService();
 
-      // Set auth token on the service
-      service.setAuthToken(authToken);
+      // Set auth token on the service (only if auth is enabled and token exists)
+      if (authEnabled && authToken) {
+        service.setAuthToken(authToken);
+      }
 
       await service.connect();
     } catch (err) {
@@ -115,15 +145,15 @@ export default function VoiceChat() {
 
   // Auto-connect on mount if authenticated
   useEffect(() => {
-    if (isAuthenticated && !isConnected && authToken) {
+    if (isAuthenticated && !isConnected && authEnabled !== null) {
       handleConnect();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, authToken]);
+  }, [isAuthenticated, authEnabled]);
 
-  // Track remaining time countdown
+  // Track remaining time countdown (only if auth is enabled)
   useEffect(() => {
-    if (!isConnected || !isAuthenticated) return;
+    if (!isConnected || !isAuthenticated || !authEnabled) return;
 
     const interval = setInterval(() => {
       setRemainingSeconds((prev) => {
@@ -140,10 +170,12 @@ export default function VoiceChat() {
 
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, isAuthenticated]);
+  }, [isConnected, isAuthenticated, authEnabled]);
 
-  // End session on unmount or tab close
+  // End session on unmount or tab close (only if auth is enabled)
   useEffect(() => {
+    if (!authEnabled) return;
+
     const endSession = async () => {
       if (sessionStart && authToken) {
         try {
@@ -176,14 +208,14 @@ export default function VoiceChat() {
       handleDisconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionStart, authToken]);
+  }, [sessionStart, authToken, authEnabled]);
 
   const handleDisconnect = () => {
     resetSecureRealtimeService();
   };
 
   const toggleListening = async () => {
-    if (!isAuthenticated) {
+    if (authEnabled && !isAuthenticated) {
       setError("Please authenticate first");
       return;
     }
@@ -245,10 +277,28 @@ export default function VoiceChat() {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
+  // Show loading state while checking auth config
+  if (authEnabled === null) {
+    return (
+      <div className="relative w-full h-screen bg-gradient-to-br from-[#0f0f1e] via-[#1a1a2e] to-[#16213e] flex items-center justify-center">
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+          className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full"
+        />
+      </div>
+    );
+  }
+
   return (
     <>
-      {/* Auth Modal */}
-      <AuthModal isOpen={showAuthModal} onAuthenticated={handleAuthenticated} />
+      {/* Auth Modal - only show if auth is enabled */}
+      {authEnabled && (
+        <AuthModal
+          isOpen={showAuthModal}
+          onAuthenticated={handleAuthenticated}
+        />
+      )}
 
       <div className="relative w-full h-screen bg-gradient-to-br from-[#0f0f1e] via-[#1a1a2e] to-[#16213e] overflow-hidden">
         {/* Audio Visualizer Background - Always visible */}
@@ -293,8 +343,8 @@ export default function VoiceChat() {
           )}
         </AnimatePresence>
 
-        {/* User Info - Top left */}
-        {isAuthenticated && (
+        {/* User Info - Top left (only show if auth is enabled) */}
+        {authEnabled && isAuthenticated && (
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}

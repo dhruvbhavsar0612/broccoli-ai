@@ -19,45 +19,56 @@ interface JWTPayload {
 // Generate ephemeral session token for OpenAI Realtime API
 export async function POST(request: NextRequest) {
   try {
-    // Verify authentication
-    const authHeader = request.headers.get("authorization");
+    const enableAuth = process.env.ENABLE_AUTH === "true";
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json(
-        { error: "Authentication required" },
-        { status: 401 },
-      );
+    let userEmail = "anonymous@user.com";
+    let sessionStart = new Date();
+    let remainingSeconds = 180;
+
+    // Only verify authentication if ENABLE_AUTH is true
+    if (enableAuth) {
+      // Verify authentication
+      const authHeader = request.headers.get("authorization");
+
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return NextResponse.json(
+          { error: "Authentication required" },
+          { status: 401 },
+        );
+      }
+
+      const token = authHeader.substring(7);
+
+      // Verify JWT token
+      let decoded: JWTPayload;
+      try {
+        decoded = verify(token, JWT_SECRET) as JWTPayload;
+      } catch (error) {
+        return NextResponse.json(
+          { error: "Invalid or expired token" },
+          { status: 401 },
+        );
+      }
+
+      // Check if user exists and has remaining time
+      const user = await getUserByEmail(decoded.email);
+
+      if (!user) {
+        return NextResponse.json({ error: "User not found" }, { status: 404 });
+      }
+
+      if (user.remaining_seconds <= 0) {
+        return NextResponse.json(
+          { error: "No remaining usage time available" },
+          { status: 403 },
+        );
+      }
+
+      // Start session tracking
+      sessionStart = await startSession(decoded.email);
+      userEmail = decoded.email;
+      remainingSeconds = user.remaining_seconds;
     }
-
-    const token = authHeader.substring(7);
-
-    // Verify JWT token
-    let decoded: JWTPayload;
-    try {
-      decoded = verify(token, JWT_SECRET) as JWTPayload;
-    } catch (error) {
-      return NextResponse.json(
-        { error: "Invalid or expired token" },
-        { status: 401 },
-      );
-    }
-
-    // Check if user exists and has remaining time
-    const user = await getUserByEmail(decoded.email);
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
-    if (user.remaining_seconds <= 0) {
-      return NextResponse.json(
-        { error: "No remaining usage time available" },
-        { status: 403 },
-      );
-    }
-
-    // Start session tracking
-    const sessionStart = await startSession(decoded.email);
 
     // Get API key from server-side environment variable (never exposed to client)
     const apiKey = process.env.OPENAI_API_KEY;
@@ -115,9 +126,9 @@ export async function POST(request: NextRequest) {
         temperature: parseFloat(process.env.TEMPERATURE || "0.8"),
         maxTokens: parseInt(process.env.MAX_TOKENS || "4096"),
         // User session info
-        userEmail: decoded.email,
+        userEmail: userEmail,
         sessionStart: sessionStart.toISOString(),
-        remainingSeconds: user.remaining_seconds,
+        remainingSeconds: remainingSeconds,
       },
       {
         headers: {
@@ -144,5 +155,6 @@ export async function GET() {
     status: "ok",
     message: "Realtime API token endpoint is available",
     configured: !!process.env.OPENAI_API_KEY,
+    authEnabled: process.env.ENABLE_AUTH === "true",
   });
 }
