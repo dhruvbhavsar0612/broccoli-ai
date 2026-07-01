@@ -82,22 +82,29 @@ export async function POST(request: NextRequest) {
 
     // Get model and configuration from server environment
     const model = process.env.MODEL_NAME || "gpt-realtime-mini";
+    const voice = process.env.VOICE || "sage";
+    const openaiBaseUrl =
+      process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
 
-    // Call OpenAI API to create an ephemeral token
-    const response = await fetch(
-      "https://api.openai.com/v1/realtime/sessions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: model,
-          voice: process.env.VOICE || "sage",
-        }),
+    // Call OpenAI GA Realtime API to create an ephemeral client secret
+    const response = await fetch(`${openaiBaseUrl}/realtime/client_secrets`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
       },
-    );
+      body: JSON.stringify({
+        session: {
+          type: "realtime",
+          model,
+          audio: {
+            output: {
+              voice,
+            },
+          },
+        },
+      }),
+    });
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
@@ -113,15 +120,19 @@ export async function POST(request: NextRequest) {
     }
 
     const sessionData = await response.json();
+    const session = sessionData.session;
+
+    const websocketBaseUrl = openaiBaseUrl.replace(/^http/, "ws");
 
     // Return session configuration to client (ephemeral token only, not the main API key)
     return NextResponse.json(
       {
-        client_secret: sessionData.client_secret?.value || null,
-        session_id: sessionData.id,
+        client_secret: sessionData.value || null,
+        session_id: session?.id,
         expires_at: sessionData.expires_at,
-        model: sessionData.model,
-        voice: sessionData.voice,
+        model: session?.model || model,
+        voice: session?.audio?.output?.voice || voice,
+        websocket_url: `${websocketBaseUrl}/realtime`,
         // Additional configuration
         temperature: parseFloat(process.env.TEMPERATURE || "0.8"),
         maxTokens: parseInt(process.env.MAX_TOKENS || "4096"),

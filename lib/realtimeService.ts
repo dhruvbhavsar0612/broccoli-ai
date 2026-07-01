@@ -29,11 +29,7 @@ export class RealtimeService {
       // Connect to OpenAI Realtime API
       this.ws = new WebSocket(
         `wss://api.openai.com/v1/realtime?model=${model}`,
-        [
-          "realtime",
-          `openai-insecure-api-key.${this.apiKey}`,
-          "openai-beta.realtime-v1",
-        ],
+        ["realtime", `openai-insecure-api-key.${this.apiKey}`],
       );
 
       this.ws.addEventListener("open", () => {
@@ -72,6 +68,9 @@ export class RealtimeService {
     if (!this.ws) return;
 
     // Get configuration from environment or use defaults
+    const model =
+      process.env.NEXT_PUBLIC_MODEL_NAME ||
+      "gpt-4o-realtime-preview-2024-12-17";
     const voice = process.env.NEXT_PUBLIC_VOICE || "alloy";
     const temperature = parseFloat(
       process.env.NEXT_PUBLIC_TEMPERATURE || "0.8",
@@ -81,23 +80,37 @@ export class RealtimeService {
     const sessionConfig = {
       type: "session.update",
       session: {
-        modalities: ["text", "audio"],
+        type: "realtime",
+        model,
+        output_modalities: ["audio"],
         instructions:
           "You are a helpful, friendly, and concise assistant. Keep your responses clear and engaging.",
-        voice,
-        input_audio_format: "pcm16",
-        output_audio_format: "pcm16",
-        input_audio_transcription: {
-          model: "whisper-1",
-        },
-        turn_detection: {
-          type: "server_vad",
-          threshold: 0.5,
-          prefix_padding_ms: 300,
-          silence_duration_ms: 500,
+        audio: {
+          input: {
+            format: {
+              type: "audio/pcm",
+              rate: 24000,
+            },
+            transcription: {
+              model: "whisper-1",
+            },
+            turn_detection: {
+              type: "server_vad",
+              threshold: 0.5,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 500,
+            },
+          },
+          output: {
+            format: {
+              type: "audio/pcm",
+              rate: 24000,
+            },
+            voice,
+          },
         },
         temperature,
-        max_response_output_tokens: maxTokens,
+        max_output_tokens: maxTokens,
       },
     };
 

@@ -152,14 +152,14 @@ if [ -f ".env.local" ]; then
 else
     print_info "Creating .env.local file..."
     cat > .env.local << 'EOF'
-# OpenAI API Configuration
-NEXT_PUBLIC_OPENAI_API_KEY=your_openai_api_key_here
+# OpenAI API Configuration (server-side only — never expose to client)
+OPENAI_API_KEY=your_openai_api_key_here
 
 # Model Configuration
-NEXT_PUBLIC_MODEL_NAME=gpt-4o-realtime-preview-2024-12-17
-NEXT_PUBLIC_VOICE=sage
-NEXT_PUBLIC_TEMPERATURE=0.8
-NEXT_PUBLIC_MAX_TOKENS=4096
+MODEL_NAME=gpt-realtime-mini
+VOICE=sage
+TEMPERATURE=0.8
+MAX_TOKENS=4096
 
 # Application Configuration
 NODE_ENV=production

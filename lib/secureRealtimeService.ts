@@ -66,14 +66,12 @@ export class SecureRealtimeService {
         maxTokens: sessionData.maxTokens || 4096,
       };
 
-      // Connect to OpenAI Realtime API using ephemeral token
+      // Connect to OpenAI Realtime API using ephemeral token (GA API)
+      const websocketBaseUrl =
+        sessionData.websocket_url || "wss://api.openai.com/v1/realtime";
       this.ws = new WebSocket(
-        `wss://api.openai.com/v1/realtime?model=${sessionData.model}`,
-        [
-          "realtime",
-          `openai-insecure-api-key.${sessionData.client_secret}`,
-          "openai-beta.realtime-v1",
-        ],
+        `${websocketBaseUrl}?model=${sessionData.model}`,
+        ["realtime", `openai-insecure-api-key.${sessionData.client_secret}`],
       );
 
       this.ws.addEventListener("open", () => {
@@ -118,23 +116,37 @@ export class SecureRealtimeService {
     const sessionConfig = {
       type: "session.update",
       session: {
-        modalities: ["text", "audio"],
+        type: "realtime",
+        model: this.sessionConfig.model,
+        output_modalities: ["audio"],
         instructions:
           "You are a helpful, friendly, and concise assistant. Keep your responses clear and engaging.",
-        voice: this.sessionConfig.voice,
-        input_audio_format: "pcm16",
-        output_audio_format: "pcm16",
-        input_audio_transcription: {
-          model: "whisper-1",
-        },
-        turn_detection: {
-          type: "server_vad",
-          threshold: 0.5,
-          prefix_padding_ms: 300,
-          silence_duration_ms: 500,
+        audio: {
+          input: {
+            format: {
+              type: "audio/pcm",
+              rate: 24000,
+            },
+            transcription: {
+              model: "whisper-1",
+            },
+            turn_detection: {
+              type: "server_vad",
+              threshold: 0.5,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 500,
+            },
+          },
+          output: {
+            format: {
+              type: "audio/pcm",
+              rate: 24000,
+            },
+            voice: this.sessionConfig.voice,
+          },
         },
         temperature: this.sessionConfig.temperature,
-        max_response_output_tokens: this.sessionConfig.maxTokens,
+        max_output_tokens: this.sessionConfig.maxTokens,
       },
     };
 
