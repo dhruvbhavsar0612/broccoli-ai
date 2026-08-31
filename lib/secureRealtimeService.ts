@@ -2,11 +2,13 @@
 
 import { useVoiceChatStore } from "./store";
 import { getAudioCueManager } from "./audioCues";
+import { updateRealtimeAudioData } from "@/components/AudioVisualizer";
 
 export class SecureRealtimeService {
   private ws: WebSocket | null = null;
   private audioContext: AudioContext | null = null;
   private mediaStream: MediaStream | null = null;
+  private analyser: AnalyserNode | null = null;
   private isRecording = false;
   private conversationId: string | null = null;
   private sessionConfig: {
@@ -16,9 +18,26 @@ export class SecureRealtimeService {
     maxTokens: number;
   } | null = null;
   private authToken: string | null = null;
+  private animationFrameId: number | null = null;
+
+  // Audio analysis data
+  private frequencyData: Uint8Array<ArrayBuffer> = new Uint8Array(
+    0,
+  ) as Uint8Array<ArrayBuffer>;
+  private smoothedLevel: number = 0;
+  private peakLevel: number = 0;
+  private smoothedBands = {
+    sub: 0,
+    bass: 0,
+    low: 0,
+    mid: 0,
+    high: 0,
+    presence: 0,
+  };
 
   constructor() {
-    // No API key needed on client side anymore
+    // Bind methods
+    this.analyzeAudio = this.analyzeAudio.bind(this);
   }
 
   setAuthToken(token: string) {
@@ -161,7 +180,6 @@ export class SecureRealtimeService {
         appendStreamingText,
         setCurrentStreamingText,
         addMessage,
-        setAudioLevel,
       } = useVoiceChatStore.getState();
 
       console.log("Received message:", message.type);
@@ -297,6 +315,116 @@ export class SecureRealtimeService {
     }
   }
 
+  /**
+   * Real-time audio analysis loop
+   */
+  private analyzeAudio(): void {
+    if (!this.isRecording || !this.analyser) {
+      this.animationFrameId = null;
+      return;
+    }
+
+    // Get frequency data
+    this.analyser.getByteFrequencyData(this.frequencyData);
+
+    // Calculate overall level with weighted average
+    let sum = 0;
+    let weightSum = 0;
+    for (let i = 0; i < this.frequencyData.length; i++) {
+      const weight = 1 - (i / this.frequencyData.length) * 0.5;
+      sum += this.frequencyData[i] * weight;
+      weightSum += weight;
+    }
+    const rawLevel = Math.min(1, sum / weightSum / 180);
+
+    // Smooth the level
+    this.smoothedLevel = this.lerp(this.smoothedLevel, rawLevel, 0.35);
+
+    // Update peak with decay
+    if (rawLevel > this.peakLevel) {
+      this.peakLevel = this.lerp(this.peakLevel, rawLevel, 0.9);
+    } else {
+      this.peakLevel *= 0.96;
+    }
+
+    // Calculate frequency bands
+    const bands = this.calculateBands();
+
+    // Smooth bands
+    const bandKeys = ["sub", "bass", "low", "mid", "high", "presence"] as const;
+    for (const key of bandKeys) {
+      this.smoothedBands[key] = this.lerp(
+        this.smoothedBands[key],
+        bands[key],
+        0.3,
+      );
+    }
+
+    // Update store with enhanced data
+    const { setAudioData } = useVoiceChatStore.getState();
+    setAudioData({
+      level: this.smoothedLevel,
+      peak: this.peakLevel,
+      bands: { ...this.smoothedBands },
+      isActive: true,
+    });
+
+    // Also update the visualizer directly for maximum responsiveness
+    updateRealtimeAudioData({
+      level: this.smoothedLevel,
+      peak: this.peakLevel,
+      bands: { ...this.smoothedBands },
+    });
+
+    // Continue the loop
+    this.animationFrameId = requestAnimationFrame(this.analyzeAudio);
+  }
+
+  /**
+   * Calculate frequency bands from FFT data
+   */
+  private calculateBands() {
+    const sampleRate = 24000;
+    const nyquist = sampleRate / 2;
+    const binWidth = nyquist / this.frequencyData.length;
+
+    const getBandAverage = (lowFreq: number, highFreq: number): number => {
+      const lowBin = Math.floor(lowFreq / binWidth);
+      const highBin = Math.min(
+        Math.floor(highFreq / binWidth),
+        this.frequencyData.length - 1,
+      );
+
+      if (lowBin >= highBin) return 0;
+
+      let sum = 0;
+      let count = 0;
+
+      for (let i = lowBin; i <= highBin; i++) {
+        sum += this.frequencyData[i];
+        count++;
+      }
+
+      return count > 0 ? sum / count / 255 : 0;
+    };
+
+    return {
+      sub: getBandAverage(20, 60),
+      bass: getBandAverage(60, 250),
+      low: getBandAverage(250, 500),
+      mid: getBandAverage(500, 2000),
+      high: getBandAverage(2000, 6000),
+      presence: getBandAverage(6000, Math.min(20000, nyquist)),
+    };
+  }
+
+  /**
+   * Linear interpolation helper
+   */
+  private lerp(a: number, b: number, t: number): number {
+    return a + (b - a) * t;
+  }
+
   async startListening() {
     try {
       if (this.isRecording) return;
@@ -322,28 +450,32 @@ export class SecureRealtimeService {
         this.mediaStream,
       );
 
-      // Create analyzer for visualization
-      const analyzer = this.audioContext.createAnalyser();
-      analyzer.fftSize = 256;
-      source.connect(analyzer);
+      // Create analyzer for visualization with optimized settings
+      this.analyser = this.audioContext.createAnalyser();
+      this.analyser.fftSize = 2048;
+      this.analyser.smoothingTimeConstant = 0.5;
+      this.analyser.minDecibels = -90;
+      this.analyser.maxDecibels = -10;
+      source.connect(this.analyser);
 
-      const bufferLength = analyzer.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
+      // Initialize frequency data array
+      this.frequencyData = new Uint8Array(
+        this.analyser.frequencyBinCount,
+      ) as Uint8Array<ArrayBuffer>;
 
-      // Update audio level for visualization
-      const updateAudioLevel = () => {
-        if (!this.isRecording) return;
-
-        analyzer.getByteFrequencyData(dataArray);
-        const average = dataArray.reduce((a, b) => a + b) / bufferLength;
-        const normalized = average / 255;
-        useVoiceChatStore.getState().setAudioLevel(normalized);
-
-        requestAnimationFrame(updateAudioLevel);
+      // Reset smoothed values
+      this.smoothedLevel = 0;
+      this.peakLevel = 0;
+      this.smoothedBands = {
+        sub: 0,
+        bass: 0,
+        low: 0,
+        mid: 0,
+        high: 0,
+        presence: 0,
       };
-      updateAudioLevel();
 
-      // Create script processor for audio data
+      // Create script processor for audio data to send to OpenAI
       const processor = this.audioContext.createScriptProcessor(4096, 1, 1);
       source.connect(processor);
       processor.connect(this.audioContext.destination);
@@ -380,6 +512,9 @@ export class SecureRealtimeService {
       this.isRecording = true;
       setAppState("listening");
 
+      // Start the real-time audio analysis loop
+      this.analyzeAudio();
+
       // Resume audio context for audio cues (needed after user interaction)
       getAudioCueManager().resume();
     } catch (error) {
@@ -393,12 +528,24 @@ export class SecureRealtimeService {
   stopListening() {
     if (!this.isRecording) return;
 
-    const { setAppState, setAudioLevel } = useVoiceChatStore.getState();
+    const { setAppState, resetAudioData } = useVoiceChatStore.getState();
+
+    // Stop the animation frame loop
+    if (this.animationFrameId !== null) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
 
     // Stop media stream
     if (this.mediaStream) {
       this.mediaStream.getTracks().forEach((track) => track.stop());
       this.mediaStream = null;
+    }
+
+    // Disconnect analyzer
+    if (this.analyser) {
+      this.analyser.disconnect();
+      this.analyser = null;
     }
 
     // Close audio context
@@ -408,7 +555,24 @@ export class SecureRealtimeService {
     }
 
     this.isRecording = false;
-    setAudioLevel(0);
+
+    // Reset audio visualization data
+    resetAudioData();
+
+    // Also reset the direct visualizer data
+    updateRealtimeAudioData({
+      level: 0,
+      peak: 0,
+      bands: {
+        sub: 0,
+        bass: 0,
+        low: 0,
+        mid: 0,
+        high: 0,
+        presence: 0,
+      },
+    });
+
     setAppState("idle");
 
     // Commit the audio buffer
