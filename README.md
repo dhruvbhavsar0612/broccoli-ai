@@ -15,7 +15,7 @@ A Next.js real-time voice chat application powered by OpenAI's Realtime API with
 
 ## 🚀 Live Demo
 
-**URL**: https://voice.teleai.tech
+**URL**: https://voice.teleai.live
 
 ## 📋 Tech Stack
 
@@ -182,7 +182,7 @@ CREATE INDEX idx_otp_expires ON otp_codes(expires_at);
 ### Production Server
 
 **Server**: EC2 (ap-south-1)  
-**Domain**: https://voice.teleai.tech  
+**Domain**: https://voice.teleai.live  
 **Process Manager**: PM2  
 **Web Server**: Nginx  
 **SSL**: Let's Encrypt
@@ -360,7 +360,7 @@ This project is private and proprietary.
 ## 👨‍💻 Developer
 
 **Dhruv Bhavsar**  
-Email: dhruv@teleai.tech
+Email: dhruv@teleai.live
 
 ## 🙏 Acknowledgments
 
@@ -379,7 +379,7 @@ Email: dhruv@teleai.tech
 
 ## 🔗 Links
 
-- **Production**: https://voice.teleai.tech
+- **Production**: https://voice.teleai.live
 - **Repository**: https://github.com/dhruvbhavsar0612/broccoli-ai
 - **Issues**: https://github.com/dhruvbhavsar0612/broccoli-ai/issues
 

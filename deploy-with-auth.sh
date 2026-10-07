@@ -222,7 +222,7 @@ if [ $? -eq 0 ]; then
     echo ""
     print_status "🎉 Deployment successful!"
     echo ""
-    echo "📱 Application should be available at: https://voice.teleai.tech"
+    echo "📱 Application should be available at: https://voice.teleai.live"
     echo ""
     echo "🔍 Next steps:"
     echo "   1. Test authentication flow"
